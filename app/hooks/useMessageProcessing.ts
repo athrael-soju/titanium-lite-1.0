@@ -7,25 +7,12 @@ import {
   retrieveAIResponse,
   retrieveTextFromSpeech,
 } from '@/app/services/chatService';
-
-import { persistentMemoryUtils } from '@/app/utils/persistentMemoryUtils';
-import { queryVectorDbByNamespace } from '@/app/services/vectorDbService';
-import { embedConversation } from '@/app/services/embeddingService';
 const nlp = winkNLP(model);
 
 export const useMessageProcessing = (session: any) => {
   const [messages, setMessages] = useState<IMessage[]>([]);
   const { watch, setValue } = useFormContext();
 
-  const isTextToSpeechEnabled = watch('isTextToSpeechEnabled');
-  const isAssistantEnabled = watch('isAssistantEnabled');
-  const isRagEnabled = watch('isRagEnabled');
-  const isLongTermMemoryEnabled = watch('isLongTermMemoryEnabled');
-  const model = watch('model');
-  const voice = watch('voice');
-  const topK = watch('topK');
-  const memoryType = watch('memoryType');
-  const historyLength = watch('historyLength');
   const sentences = useRef<string[]>([]);
   const sentenceIndex = useRef<number>(0);
 
@@ -101,16 +88,6 @@ export const useMessageProcessing = (session: any) => {
     while (!isDone) {
       isDone = await processChunk();
     }
-    if (isLongTermMemoryEnabled) {
-      persistentMemoryUtils.append(memoryType, newMessage, userEmail);
-    }
-    if (isTextToSpeechEnabled) {
-      await retrieveTextFromSpeech(
-        sentences.current[sentences.current.length - 1],
-        model,
-        voice
-      );
-    }
   };
 
   const processBuffer = async (
@@ -138,15 +115,6 @@ export const useMessageProcessing = (session: any) => {
     const doc = nlp.readDoc(aiResponseText);
     sentences.current = doc.sentences().out();
     const newMessage = addAiMessageToState(aiResponseText, aiResponseId);
-    if (isTextToSpeechEnabled) {
-      if (sentences.current.length > sentenceIndex.current + 1) {
-        await retrieveTextFromSpeech(
-          sentences.current[sentenceIndex.current++],
-          model,
-          voice
-        );
-      }
-    }
     return newMessage;
   };
 
@@ -156,27 +124,21 @@ export const useMessageProcessing = (session: any) => {
     try {
       setValue('isLoading', true);
       const newMessage = addUserMessageToState(message);
-      // Append the user message to the long-term memory
-      if (isLongTermMemoryEnabled) {
-        persistentMemoryUtils.append(memoryType, newMessage, userEmail);
-      }
       const aiResponseId = uuidv4();
       // enhance the user message with context and history
       message = await enhanceMessage(message, newMessage, userEmail);
       const response = await retrieveAIResponse(
         message,
         userEmail,
-        isAssistantEnabled
+        false
       );
 
       if (!response) {
         return;
       }
-      if (isAssistantEnabled) {
-        await processResponse(response, aiResponseId);
-      } else {
+
         await processStream(response, aiResponseId);
-      }
+
     } catch (error) {
       console.error(error);
     } finally {
@@ -194,29 +156,6 @@ export const useMessageProcessing = (session: any) => {
     1. Make use of CONTEXT and HISTORY below, to briefly respond to the user prompt. 
     2. If you cannot find this information within the CONTEXT, or HISTORY, respond to the user prompt as best as you can. 
     3. You are now extra sarcastic when responding to the user.`;
-
-    if (isRagEnabled) {
-      // Augment the message with context.
-      const ragContext = await enhanceUserResponse(message, userEmail);
-      augmentedMessage += `
-
-CONTEXT:
-${ragContext || ''}`;
-    }
-    // Augment the message with the conversation history.
-    if (isLongTermMemoryEnabled && parseInt(historyLength) > 0) {
-      const conversationHistory = await persistentMemoryUtils.augment(
-        historyLength,
-        memoryType,
-        message,
-        newMessage,
-        session
-      );
-      augmentedMessage += `
-
-HISTORY: 
-${conversationHistory || ''}`;
-    }
     message = `${augmentedMessage}
 
 PROMPT: 
@@ -224,27 +163,6 @@ ${message}
           `;
     //console.info('Enhanced message: ', message);
     return message;
-  }
-
-  async function enhanceUserResponse(message: string, userEmail: string) {
-    const jsonMessage = [
-      {
-        text: message,
-        metadata: {
-          user_email: userEmail,
-        },
-      },
-    ];
-
-    const embeddedMessage = await embedConversation(jsonMessage, userEmail);
-
-    const vectorResponse = await queryVectorDbByNamespace(
-      embeddedMessage.embeddings,
-      userEmail,
-      topK
-    );
-
-    return vectorResponse.context;
   }
 
   async function processResponse(
@@ -261,9 +179,6 @@ ${message}
         ? await response.json()
         : await response.text();
       addAiMessageToState(data, aiResponseId);
-      if (isTextToSpeechEnabled) {
-        await retrieveTextFromSpeech(data, model, voice);
-      }
     } catch (error) {
       console.error('Error processing response: ', error);
     }

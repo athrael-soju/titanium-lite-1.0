@@ -4,14 +4,13 @@ import { useFormContext } from 'react-hook-form';
 import winkNLP from 'wink-nlp';
 import model from 'wink-eng-lite-web-model';
 import {
-  retrieveAIResponse,
-  retrieveTextFromSpeech,
+  retrieveAIResponse
 } from '@/app/services/chatService';
 const nlp = winkNLP(model);
 
 export const useMessageProcessing = (session: any) => {
   const [messages, setMessages] = useState<IMessage[]>([]);
-  const { watch, setValue } = useFormContext();
+  const { setValue } = useFormContext();
 
   const sentences = useRef<string[]>([]);
   const sentenceIndex = useRef<number>(0);
@@ -126,7 +125,7 @@ export const useMessageProcessing = (session: any) => {
       const newMessage = addUserMessageToState(message);
       const aiResponseId = uuidv4();
       // enhance the user message with context and history
-      message = await enhanceMessage(message, newMessage, userEmail);
+      message = await enhanceMessage(message);
       const response = await retrieveAIResponse(
         message,
         userEmail,
@@ -137,7 +136,7 @@ export const useMessageProcessing = (session: any) => {
         return;
       }
 
-        await processStream(response, aiResponseId);
+      await processStream(response, aiResponseId);
 
     } catch (error) {
       console.error(error);
@@ -147,9 +146,7 @@ export const useMessageProcessing = (session: any) => {
   };
 
   async function enhanceMessage(
-    message: string,
-    newMessage: IMessage,
-    userEmail: string
+    message: string
   ) {
     let augmentedMessage = `
     FOLLOW THESE INSTRUCTIONS AT ALL TIMES:
@@ -161,28 +158,9 @@ export const useMessageProcessing = (session: any) => {
 PROMPT: 
 ${message}
           `;
-    //console.info('Enhanced message: ', message);
     return message;
   }
 
-  async function processResponse(
-    response: ReadableStreamDefaultReader<Uint8Array> | Response,
-    aiResponseId: string
-  ) {
-    if (!(response instanceof Response)) {
-      console.error('Expected a Response object, received: ', response);
-      return;
-    }
-    try {
-      const contentType = response.headers.get('Content-Type');
-      const data = contentType?.includes('application/json')
-        ? await response.json()
-        : await response.text();
-      addAiMessageToState(data, aiResponseId);
-    } catch (error) {
-      console.error('Error processing response: ', error);
-    }
-  }
   async function processStream(
     stream: ReadableStreamDefaultReader<Uint8Array> | Response,
     aiResponseId: string
